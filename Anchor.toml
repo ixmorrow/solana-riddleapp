@@ -1,5 +1,5 @@
 [programs.localnet]
-riddle_app = "BRgx1ATbc2rP9ge3k2RyCi3RWxNzbaqaveeSCeX8ZzhT"
+riddleapp = "BRgx1ATbc2rP9ge3k2RyCi3RWxNzbaqaveeSCeX8ZzhT"
 
 [registry]
 url = "https://anchor.projectserum.com"

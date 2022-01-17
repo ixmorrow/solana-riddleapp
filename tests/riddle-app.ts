@@ -11,10 +11,39 @@ describe('riddleapp', () => {
   const program = anchor.workspace.Riddleapp;
   const baseAccount  = anchor.web3.Keypair.generate();
 
+  let mint = null;
+  let from = null;
+  let to = null;
+
+  it("Mints 100 RIDDL tokens", async () => {
+    mint = await createMint(provider, provider.wallet.publickey);
+    from = await createTokenAccount(provider, mint, provider.wallet.publicKey);
+    to = await createTokenAccount(provider, mint, provider.wallet.publicKey);
+    await program.rpc.proxyMintTo(new anchor.BN(1000), {
+      accounts: {
+        authority: provider.wallet.publicKey,
+        mint,
+        to: from,
+        tokenProgram: TokenInstructions.TOKEN_PROGRAM_ID,
+      },
+    });
+
+    const fromAccount = await getTokenAccount(provider, from);
+
+    assert.ok(fromAccount.amount.eq(new anchor.BN(1000)));
+  });
+
+  it("Initializes test state", async () => {
+    mint = await createMint(provider);
+    from = await createTokenAccount(provider, mint, provider.wallet.publicKey);
+    to = await createTokenAccount(provider, mint, provider.wallet.publicKey);
+  });
+
   it("An account is initialized", async function() {
     await program.rpc.initialize("What gets wet while drying?", "A towel", {
       accounts: {
         baseAccount: baseAccount.publicKey,
+        //user wallet
         user: provider.wallet.publicKey,
         systemProgram: SystemProgram.programId,
       },
@@ -39,7 +68,7 @@ describe('riddleapp', () => {
     assert.ok(account.isCorrect === false);
   })
 
-  it("Tries to update whithout correct answer", async function() {
+  it("Tries to update without correct answer", async function() {
     await program.rpc.update("Until I am measured, I am not known. Yet how you miss me, When I have flown.", "Time", {
       accounts: {
         baseAccount: baseAccount.publicKey,
@@ -60,6 +89,24 @@ describe('riddleapp', () => {
     const account = await program.account.baseAccount.fetch(baseAccount.publicKey);
     assert.ok(account.isCorrect === true);
   })
+
+  //want to change this smart contract side so that the client does not need to initiate the trasfer
+  // it("Transfers a token", async () => {
+  //   await program.rpc.proxyTransfer(new anchor.BN(1), {
+  //     accounts: {
+  //       authority: provider.wallet.publicKey,
+  //       to,
+  //       from,
+  //       tokenProgram: TokenInstructions.TOKEN_PROGRAM_ID,
+  //     },
+  //   });
+
+  //   const fromAccount = await getTokenAccount(provider, from);
+  //   const toAccount = await getTokenAccount(provider, to);
+
+  //   assert.ok(fromAccount.amount.eq(new anchor.BN(990)));
+  //   assert.ok(toAccount.amount.eq(new anchor.BN(10)));
+  // });
 
   it("Updating riddle account after correctly answering initial riddle", async function() {
     await program.rpc.update("Until I am measured, I am not known. Yet how you miss me, When I have flown.", "Time", {
@@ -86,3 +133,98 @@ describe('riddleapp', () => {
   })
 
 })
+
+
+
+
+/////////////////////////////////////////////////////////////////////////////////
+
+const serumCmn = require("@project-serum/common");
+const TokenInstructions = require("@project-serum/serum").TokenInstructions;
+
+const TOKEN_PROGRAM_ID = new anchor.web3.PublicKey(
+  TokenInstructions.TOKEN_PROGRAM_ID.toString()
+);
+
+async function getTokenAccount(provider, addr) {
+  return await serumCmn.getTokenAccount(provider, addr);
+}
+
+async function getMintInfo(provider, mintAddr) {
+  return await serumCmn.getMintInfo(provider, mintAddr);
+}
+
+async function createMint(provider, authority) {
+  if (authority === undefined) {
+    authority = provider.wallet.publicKey;
+  }
+  const mint = anchor.web3.Keypair.generate();
+  const instructions = await createMintInstructions(
+    provider,
+    authority,
+    mint.publicKey
+  );
+
+  const tx = new anchor.web3.Transaction();
+  tx.add(...instructions);
+
+  await provider.send(tx, [mint]);
+
+  return mint.publicKey;
+}
+
+async function createMintInstructions(provider, authority, mint) {
+  let instructions = [
+    anchor.web3.SystemProgram.createAccount({
+      fromPubkey: provider.wallet.publicKey,
+      newAccountPubkey: mint,
+      space: 82,
+      lamports: await provider.connection.getMinimumBalanceForRentExemption(82),
+      programId: TOKEN_PROGRAM_ID,
+    }),
+    TokenInstructions.initializeMint({
+      mint,
+      decimals: 0,
+      mintAuthority: authority,
+    }),
+  ];
+  return instructions;
+}
+
+async function createTokenAccount(provider, mint, owner) {
+  const vault = anchor.web3.Keypair.generate();
+  const tx = new anchor.web3.Transaction();
+  tx.add(
+    ...(await createTokenAccountInstrs(provider, vault.publicKey, mint, owner))
+  );
+  await provider.send(tx, [vault]);
+  return vault.publicKey;
+}
+
+async function createTokenAccountInstrs(
+  provider,
+  newAccountPubkey,
+  mint,
+  owner,
+  lamports
+) {
+  if (lamports === undefined) {
+    lamports = await provider.connection.getMinimumBalanceForRentExemption(165);
+  }
+  return [
+    anchor.web3.SystemProgram.createAccount({
+      fromPubkey: provider.wallet.publicKey,
+      newAccountPubkey,
+      space: 165,
+      lamports,
+      programId: TOKEN_PROGRAM_ID,
+    }),
+    TokenInstructions.initializeAccount({
+      account: newAccountPubkey,
+      mint,
+      owner,
+    }),
+  ];
+}
+
+/////////////////////////////////////////////////////////////////////////////////
